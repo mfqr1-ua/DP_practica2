@@ -535,11 +535,12 @@ mae_seq_lstm  = mean_absolute_error(y_te, pred_seq_lstm)
 print(f"MAE LSTM secuencial: {mae_seq_lstm:.4f}")
 
 # ────────── Bloque 0: Instalar Java 17 ──────────
-!apt-get update -qq
-!apt-get install -y -qq openjdk-17-jdk-headless
+# (comentado para evitar llamadas a shell en un script)
+# !apt-get update -qq
+# !apt-get install -y -qq openjdk-17-jdk-headless
 
 # Verificamos la versión de Java
-!java -version
+# !java -version
 
 # Bloque Avanzado (Corregido): Preprocesado + Augmentación
 
@@ -818,26 +819,47 @@ print(f"\nTest MAE (USE): {test_mae:.4f}")
 
 # ────────── Bloque: Explicación con SHAP (simplificado) ──────────
 
-# 1) Instalar SHAP (si no lo has hecho)
-!pip install -q shap
+# 1) Importar SHAP (si está disponible)
+try:
+    import shap
+    shap.initjs()
+except ImportError:
+    shap = None
 
-# 2) Importar y habilitar notebooks
-import shap
-import numpy as np
-shap.initjs()
+# 2) Usar 100 ejemplos aleatorios de train como fondo
+if shap is not None:
+    background = X_train_txt[np.random.choice(len(X_train_txt), 100, replace=False)]
 
-# 3) Usar 100 ejemplos aleatorios de train como fondo
-background = X_train_txt[np.random.choice(len(X_train_txt), 100, replace=False)]
+    # 3) Crear el Explainer dejando que SHAP infiera el masker
+    explainer = shap.Explainer(model_use, background)
 
-# 4) Crear el Explainer dejando que SHAP infiera el masker
-explainer = shap.Explainer(model_use, background)
+    # 4) Explicar unas cuantas muestras de test
+    samples     = X_test_txt[:3]
+    shap_values = explainer(samples)
 
-# 5) Explicar unas cuantas muestras de test
-samples     = X_test_txt[:3]
-shap_values = explainer(samples)
+    # 5) Mostrar contribuciones palabra a palabra
+    for i, sv in enumerate(shap_values):
+        print(f"\n— Explicación muestra #{i} —")
+        print(samples[i], "\n")
+        shap.plots.text(sv)
+else:
+    print("El paquete shap no está instalado. No se pueden generar explicaciones.")
 
-# 6) Mostrar contribuciones palabra a palabra
-for i, sv in enumerate(shap_values):
-    print(f"\n— Explicación muestra #{i} —")
-    print(samples[i], "\n")
-    shap.plots.text(sv)
+# ────────── Bloque: Comparativa con test estadístico ──────────
+
+pred_bow = model_bow.predict(X_test_bow).ravel()
+pred_use = model_use.predict(X_test_txt).ravel()
+
+errors_bow = np.abs(y_test - pred_bow)
+errors_use = np.abs(y_test - pred_use)
+
+from scipy.stats import wilcoxon
+stat, p_value = wilcoxon(errors_bow, errors_use)
+
+print("\nComparativa BoW vs USE en test:")
+print(f"MAE BoW: {np.mean(errors_bow):.4f} — MAE USE: {np.mean(errors_use):.4f}")
+print(f"Wilcoxon statistic = {stat:.4f}, p-value = {p_value:.4f}")
+if p_value < 0.05:
+    print("=> Diferencia estadísticamente significativa (p < 0.05)")
+else:
+    print("=> No hay evidencia suficiente para afirmar diferencia (p ≥ 0.05)")
